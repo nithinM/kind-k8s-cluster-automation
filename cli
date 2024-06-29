@@ -21,7 +21,7 @@ build_docker_image() {
 # Run the Docker container and keep it running
 run_docker_container() {
   echo "Running Docker container..."
-  docker run -d --privileged --name ${CONTAINER_NAME} -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/workspace ${IMAGE_NAME} sleep infinity
+  docker run -d --privileged --name ${CONTAINER_NAME} -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)":/workspace ${IMAGE_NAME} sleep infinity
 }
 
 # Execute a command inside the Docker container
