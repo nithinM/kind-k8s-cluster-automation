@@ -1,0 +1,110 @@
+#!/bin/bash
+
+# Set default versions for Terraform, KinD, and kubectl if not provided
+TERRAFORM_VERSION=${TERRAFORM_VERSION:-"1.8.5"}
+KIND_VERSION=${KIND_VERSION:-"v0.23.0"}
+KUBECTL_VERSION=${KUBECTL_VERSION:-"latest"}
+
+# Set Docker image and container names
+IMAGE_NAME="terraform-kind"
+CONTAINER_NAME="terraform-kind-container"
+
+# Build the Docker image
+build_docker_image() {
+  echo "Building Docker image..."
+  docker build --build-arg TERRAFORM_VERSION=${TERRAFORM_VERSION} \
+               --build-arg KIND_VERSION=${KIND_VERSION} \
+               --build-arg KUBECTL_VERSION=${KUBECTL_VERSION} \
+               -t ${IMAGE_NAME} .
+}
+
+# Run the Docker container and keep it running
+run_docker_container() {
+  echo "Running Docker container..."
+  docker run -d --privileged --name ${CONTAINER_NAME} -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/workspace ${IMAGE_NAME} sleep infinity
+}
+
+# Execute a command inside the Docker container
+exec_in_container() {
+  local command=$1
+  echo "Executing command in Docker container: ${command}..."
+  docker exec -it ${CONTAINER_NAME} /bin/bash -c "
+    cd /workspace
+    ${command}
+  "
+}
+
+# Stop the running Docker container
+stop_docker_container() {
+  echo "Stopping Docker container..."
+  docker stop ${CONTAINER_NAME}
+}
+
+# Remove the Docker container and image
+cleanup_resources() {
+  echo "Removing Docker container and associated resources..."
+  docker rm -f ${CONTAINER_NAME}
+  docker rmi -f ${IMAGE_NAME}
+}
+
+# Access the running Docker container interactively
+access_container() {
+  echo "Accessing Docker container interactively..."
+  docker exec -it ${CONTAINER_NAME} /bin/bash
+}
+
+# Display usage information
+usage() {
+  echo "Usage: $0 {setup|docker <docker-command>|terraform <terraform-command>|stop|cleanup|access}"
+  echo
+  echo "Commands:"
+  echo "  setup                       Build the Docker image and run the container"
+  echo "  docker <docker-command>     Run a Docker command inside the container"
+  echo "  terraform <terraform-command> Run a Terraform command inside the container"
+  echo "  stop                        Stop the running Docker container"
+  echo "  cleanup                     Remove the Docker container and image"
+  echo "  access                      Access the running Docker container interactively"
+  echo
+  echo "Examples:"
+  echo "  $0 setup"
+  echo "  $0 docker ps"
+  echo "  $0 terraform init"
+  echo "  $0 stop"
+  echo "  $0 cleanup"
+  echo "  $0 access"
+}
+
+# Main entry point
+main() {
+  case $1 in
+    setup)
+      build_docker_image
+      run_docker_container
+      ;;
+    docker)
+      shift
+      exec_in_container "docker $*"
+      ;;
+    terraform)
+      shift
+      exec_in_container "terraform $*"
+      ;;
+    stop)
+      stop_docker_container
+      ;;
+    cleanup)
+      stop_docker_container
+      cleanup_resources
+      ;;
+    access)
+      access_container
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+# Run the main entry point
+main "$@"
