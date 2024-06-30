@@ -1,74 +1,105 @@
 #!/bin/bash
 
-# Set default versions for Terraform, KinD, and kubectl if not provided
-TERRAFORM_VERSION=${TERRAFORM_VERSION:-"1.8.5"}
-KIND_VERSION=${KIND_VERSION:-"v0.23.0"}
-KUBECTL_VERSION=${KUBECTL_VERSION:-"latest"}
-
-# Set Docker image and container names
-IMAGE_NAME="terraform-kind"
-CONTAINER_NAME="terraform-kind-container"
+# Load environment variables from .env file if it exists
+if [ -f .env ]; then
+  set -o allexport
+  source .env
+  set -o allexport
+fi
 
 # Build the Docker image
 build_docker_image() {
   echo "Building Docker image..."
-  docker build --build-arg TERRAFORM_VERSION=${TERRAFORM_VERSION} \
-               --build-arg KIND_VERSION=${KIND_VERSION} \
-               --build-arg KUBECTL_VERSION=${KUBECTL_VERSION} \
-               -t ${IMAGE_NAME} .
+  docker build --build-arg TERRAFORM_VERSION="${TERRAFORM_VERSION}" \
+               --build-arg KIND_VERSION="${KIND_VERSION}" \
+               --build-arg KUBECTL_VERSION="${KUBECTL_VERSION}" \
+               -t "${IMAGE_NAME}" .
 }
 
 # Run the Docker container and keep it running
 run_docker_container() {
   echo "Running Docker container..."
-  docker run -d --privileged --name ${CONTAINER_NAME} -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)":/workspace ${IMAGE_NAME} sleep infinity
+  docker run -d --privileged --name "${CONTAINER_NAME}" --network host -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)":/workspace "${IMAGE_NAME}" sleep infinity
 }
 
 # Execute a command inside the Docker container
 exec_in_container() {
   local command=$1
   echo "Executing command in Docker container: ${command}..."
-  docker exec -it ${CONTAINER_NAME} /bin/bash -c "
+  docker exec -it "${CONTAINER_NAME}" /bin/bash -c "
     cd /workspace
+    if [ -f .env ]; then
+      set -o allexport
+      source .env
+      set +o allexport
+    fi
     ${command}
   "
 }
 
-# Stop the running Docker container
-stop_docker_container() {
-  echo "Stopping Docker container..."
-  docker stop ${CONTAINER_NAME}
+# Function to create KinD cluster inside the Docker container using Terraform
+create_kind_cluster() {
+  echo "Creating KinD cluster..."
+  exec_in_container "cd /workspace/terraform && terraform init && terraform apply -auto-approve"
 }
 
-# Remove the Docker container and image
+# Function to stop the Docker container
+stop_docker_container() {
+  echo "Stopping Docker container..."
+  docker stop "${CONTAINER_NAME}"
+}
+
+# Remove the Docker container and image, and clean up Terraform resources
 cleanup_resources() {
-  echo "Removing Docker container and associated resources..."
-  docker rm -f ${CONTAINER_NAME}
-  docker rmi -f ${IMAGE_NAME}
+  echo "Destroying Terraform resources..."
+  exec_in_container "cd /workspace/terraform && terraform destroy -auto-approve && rm -rf .terraform terraform.tfstate* .terraform.lock.hcl"
+
+  echo "Stopping and removing Docker container..."
+  docker rm -f "${CONTAINER_NAME}"
+
+  echo "Removing Docker image..."
+  docker rmi -f "${IMAGE_NAME}"
+
+  echo "Removing KinD node images..."
+  KIND_IMAGES=$(docker images | grep 'kindest/node' | awk '{print $3}')
+  if [ -z "$KIND_IMAGES" ]; then
+    echo "No KinD node images found."
+  else
+    echo "KinD node images to be removed: $KIND_IMAGES"
+    echo "$KIND_IMAGES" | xargs -r docker rmi -f
+  fi
+
+  echo "Listing all Docker images after cleanup..."
 }
 
 # Access the running Docker container interactively
 access_container() {
   echo "Accessing Docker container interactively..."
-  docker exec -it ${CONTAINER_NAME} /bin/bash
+  docker exec -it "${CONTAINER_NAME}" /bin/bash
 }
 
 # Display usage information
 usage() {
-  echo "Usage: $0 {setup|docker <docker-command>|terraform <terraform-command>|stop|cleanup|access}"
+  echo "Usage: $0 {setup|docker <docker-command>|terraform <terraform-command>|kind <kind-command>|kubectl <kubectl-command>|apply|stop|cleanup|access}"
   echo
   echo "Commands:"
-  echo "  setup                       Build the Docker image and run the container"
+  echo "  setup                       Build the Docker image, run the container, and set up the KinD cluster"
   echo "  docker <docker-command>     Run a Docker command inside the container"
   echo "  terraform <terraform-command> Run a Terraform command inside the container"
+  echo "  kind <kind-command>         Run a KinD command inside the container"
+  echo "  kubectl <kubectl-command>   Run a kubectl command inside the container"
+  echo "  apply                       Apply the Terraform configuration to create the KinD cluster"
   echo "  stop                        Stop the running Docker container"
-  echo "  cleanup                     Remove the Docker container and image"
+  echo "  cleanup                     Destroy Terraform resources, stop and remove the Docker container, and remove the Docker image"
   echo "  access                      Access the running Docker container interactively"
   echo
   echo "Examples:"
   echo "  $0 setup"
   echo "  $0 docker ps"
   echo "  $0 terraform init"
+  echo "  $0 kind create cluster"
+  echo "  $0 kubectl get pods"
+  echo "  $0 apply"
   echo "  $0 stop"
   echo "  $0 cleanup"
   echo "  $0 access"
@@ -80,6 +111,7 @@ main() {
     setup)
       build_docker_image
       run_docker_container
+      create_kind_cluster
       ;;
     docker)
       shift
@@ -87,13 +119,23 @@ main() {
       ;;
     terraform)
       shift
-      exec_in_container "terraform $*"
+      exec_in_container "cd /workspace/terraform && terraform $*"
+      ;;
+    kind)
+      shift
+      exec_in_container "kind $*"
+      ;;
+    kubectl)
+      shift
+      exec_in_container "kubectl $*"
+      ;;
+    apply)
+      exec_in_container "cd /workspace/terraform && terraform init && terraform apply -auto-approve"
       ;;
     stop)
       stop_docker_container
       ;;
     cleanup)
-      stop_docker_container
       cleanup_resources
       ;;
     access)
@@ -102,7 +144,6 @@ main() {
     *)
       usage
       exit 1
-      ;;
   esac
 }
 

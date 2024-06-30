@@ -33,4 +33,7 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+.idea
+.terraform.lock.hcl
+kind-config.yaml
 

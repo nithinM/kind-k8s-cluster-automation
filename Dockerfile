@@ -2,7 +2,7 @@
 FROM docker:latest
 
 # Set default versions for Terraform, KinD, and kubectl
-ARG TERRAFORM_VERSION="1.8.5"
+ARG TERRAFORM_VERSION="1.9.0"
 ARG KIND_VERSION="v0.23.0"
 ARG KUBECTL_VERSION="latest"
 
@@ -16,6 +16,8 @@ RUN apk add --no-cache \
     bash \
     git \
     openrc \
+    docker \
+    docker-openrc \
     python3 \
     py3-pip
 
@@ -56,3 +58,9 @@ RUN if [ "$KUBECTL_VERSION" = "latest" ]; then \
     echo "Architecture is set to $ARCH" && \
     curl -LO "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/$ARCH/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+# Start Docker daemon
+RUN rc-update add docker boot
+
+# Set up the workspace directory
+WORKDIR /workspace
