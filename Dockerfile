@@ -5,6 +5,7 @@ FROM docker:latest
 ARG TERRAFORM_VERSION="1.9.0"
 ARG KIND_VERSION="v0.23.0"
 ARG KUBECTL_VERSION="latest"
+ARG HELM_VERSION="v3.6.3"
 
 # Print the target platform for debugging purposes
 ARG TARGETPLATFORM
@@ -19,7 +20,8 @@ RUN apk add --no-cache \
     docker \
     docker-openrc \
     python3 \
-    py3-pip
+    py3-pip \
+    jq
 
 # Install KinD
 RUN ARCH=$(echo $TARGETPLATFORM | cut -d'/' -f2) && \
@@ -58,6 +60,25 @@ RUN if [ "$KUBECTL_VERSION" = "latest" ]; then \
     echo "Architecture is set to $ARCH" && \
     curl -LO "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/$ARCH/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+# Install Helm
+RUN ARCH=$(echo $TARGETPLATFORM | cut -d'/' -f2) && \
+    echo "Determined architecture: $ARCH" && \
+    if [ "$ARCH" = "amd64" ]; then \
+        curl -fsSL https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz -o helm.tar.gz; \
+        tar -zxvf helm.tar.gz; \
+        mv linux-amd64/helm /usr/local/bin/helm; \
+    elif [ "$ARCH" = "arm64" ]; then \
+        curl -fsSL https://get.helm.sh/helm-${HELM_VERSION}-linux-arm64.tar.gz -o helm.tar.gz; \
+        tar -zxvf helm.tar.gz; \
+        mv linux-arm64/helm /usr/local/bin/helm; \
+    else \
+        echo "Unsupported architecture"; exit 1; \
+    fi && \
+    rm helm.tar.gz
+
+# Expose necessary ports
+EXPOSE 8080 9090
 
 # Start Docker daemon
 RUN rc-update add docker boot
