@@ -4,7 +4,6 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 EOF
-
   control_planes = [
     for i in range(var.control_plane_count) : <<-EOF
   - role: control-plane
@@ -17,7 +16,10 @@ EOF
           node-labels: "ingress-ready=true"
     extraPortMappings:
     - containerPort: 80
-      hostPort: ${80 + i}
+      hostPort: ${80+i}
+      protocol: TCP
+    - containerPort: 443
+      hostPort: ${443+i}
       protocol: TCP
 EOF
   ]
