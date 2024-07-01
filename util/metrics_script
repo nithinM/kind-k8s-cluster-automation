@@ -1,0 +1,65 @@
+#!/bin/bash
+
+# Set the Prometheus server URL
+PROMETHEUS_URL="http://localhost:9090/api/v1/query_range"
+
+# Define the queries
+QUERIES=(
+  'rate(nginx_ingress_controller_nginx_process_requests_total[1m])'
+  'avg_over_time(nginx_ingress_controller_nginx_process_resident_memory_bytes[1m])'
+  'rate(nginx_ingress_controller_nginx_process_cpu_seconds_total[1m])'
+)
+
+# Define the query labels
+LABELS=(
+  'avg_requests_per_second'
+  'avg_memory_usage_per_second'
+  'avg_cpu_usage_per_second'
+)
+
+# Define the time range for the queries
+END=$(date +%s)
+START=$((END - 3600))  # last 1 hour
+STEP="60"  # interval step in seconds (1 minute)
+
+# Fetch data from Prometheus
+fetch_data() {
+  local query=$1
+  curl -s -G "${PROMETHEUS_URL}" --data-urlencode "query=${query}" --data-urlencode "start=${START}" --data-urlencode "end=${END}" --data-urlencode "step=${STEP}"
+}
+
+# Create a temporary directory to store JSON responses
+TMP_DIR=$(mktemp -d)
+
+# Fetch data for each query and save the response to a temporary file
+for i in "${!QUERIES[@]}"; do
+  fetch_data "${QUERIES[$i]}" > "${TMP_DIR}/${LABELS[$i]}.json"
+done
+
+# Generate CSV report
+REPORT_DIR="/workspace/report"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+REPORT_FILE="${REPORT_DIR}/metrics_report_${TIMESTAMP}.csv"
+
+# Ensure the report directory exists
+mkdir -p "${REPORT_DIR}"
+
+# Write the CSV header
+echo "timestamp,avg_requests_per_second,avg_memory_usage_per_second,avg_cpu_usage_per_second" > "${REPORT_FILE}"
+
+# Extract timestamps from the first JSON response
+TIMESTAMPS=$(jq -r '.data.result[0].values[][0]' "${TMP_DIR}/${LABELS[0]}.json")
+
+# Write data to CSV file
+for timestamp in $TIMESTAMPS; do
+  human_readable_timestamp=$(date -d @"${timestamp}" "+%Y-%m-%dT%H:%M:%S%z")
+  avg_requests_per_second=$(jq -r ".data.result[0].values[] | select(.[0] == ${timestamp}) | .[1]" "${TMP_DIR}/${LABELS[0]}.json")
+  avg_memory_usage_per_second=$(jq -r ".data.result[0].values[] | select(.[0] == ${timestamp}) | .[1]" "${TMP_DIR}/${LABELS[1]}.json")
+  avg_cpu_usage_per_second=$(jq -r ".data.result[0].values[] | select(.[0] == ${timestamp}) | .[1]" "${TMP_DIR}/${LABELS[2]}.json")
+  echo "${human_readable_timestamp},${avg_requests_per_second},${avg_memory_usage_per_second},${avg_cpu_usage_per_second}" >> "${REPORT_FILE}"
+done
+
+# Clean up temporary directory
+rm -rf "${TMP_DIR}"
+
+echo "Metrics report generated at ${REPORT_FILE}"
