@@ -21,7 +21,15 @@ RUN apk add --no-cache \
     docker-openrc \
     python3 \
     py3-pip \
-    jq
+    jq \
+    libc6-compat \
+    make \
+    gcc \
+    g++ \
+    libgcc \
+    openssl-dev \
+    nodejs \
+    npm
 
 # Install KinD
 RUN ARCH=$(echo $TARGETPLATFORM | cut -d'/' -f2) && \
@@ -76,6 +84,9 @@ RUN ARCH=$(echo $TARGETPLATFORM | cut -d'/' -f2) && \
         echo "Unsupported architecture"; exit 1; \
     fi && \
     rm helm.tar.gz
+
+# Install Artillery
+RUN npm install -g artillery
 
 # Expose necessary ports
 EXPOSE 8080 9090

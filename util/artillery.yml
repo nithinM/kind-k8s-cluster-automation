@@ -1,0 +1,31 @@
+config:
+  target: "http://localhost"
+  phases:
+    - duration: 60
+      arrivalRate: 10
+      rampTo: 50
+      name: "Warm up"
+    - duration: 180
+      arrivalRate: 100
+      name: "Sustained load"
+  defaults:
+    headers:
+      Content-Type: "application/json"
+
+scenarios:
+  - name: "Test foo endpoint"
+    flow:
+      - get:
+          url: "/foo"
+
+  - name: "Test bar endpoint"
+    flow:
+      - get:
+          url: "/bar"
+
+  - name: "Test foo and bar endpoints sequentially"
+    flow:
+      - get:
+          url: "/foo"
+      - get:
+          url: "/bar"

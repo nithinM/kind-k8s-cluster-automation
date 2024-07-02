@@ -1,32 +1,33 @@
 #!/bin/bash
 
+source ./util/common-functions.sh
+
 # Load environment variables from .env file if it exists
 if [ -f .env ]; then
   set -o allexport
   source .env
-  set -o allexport
+  set +o allexport
 fi
 
 # Build the Docker image
 build_docker_image() {
-  echo "Building Docker image..."
+  print_header "Building Docker image"
   docker build --build-arg TERRAFORM_VERSION="${TERRAFORM_VERSION}" \
                --build-arg KIND_VERSION="${KIND_VERSION}" \
                --build-arg KUBECTL_VERSION="${KUBECTL_VERSION}" \
                --build-arg HELM_VERSION="${HELM_VERSION}" \
-               -t "${IMAGE_NAME}" .
+               -t "${IMAGE_NAME}" . && print_success "Docker image built."
 }
 
 # Run the Docker container and keep it running
 run_docker_container() {
-  echo "Running Docker container..."
-  docker run -d --privileged --name "${CONTAINER_NAME}" --network host -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)":/workspace "${IMAGE_NAME}" sleep infinity
+  print_header "Running Docker container"
+  docker run -d --privileged --name "${CONTAINER_NAME}" --network host -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)":/workspace "${IMAGE_NAME}" sleep infinity && print_success "Docker container running."
 }
 
 # Execute a command inside the Docker container
 exec_in_container() {
   local command=$1
-  echo "Executing command in Docker container: ${command}..."
   docker exec -it "${CONTAINER_NAME}" /bin/bash -c "
     cd /workspace
     if [ -f .env ]; then
@@ -40,55 +41,54 @@ exec_in_container() {
 
 # Function to create KinD cluster inside the Docker container using Terraform
 create_kind_cluster() {
-  echo "Creating KinD cluster..."
-  exec_in_container "cd /workspace/terraform && terraform init && terraform apply -auto-approve"
+  print_header "Creating KinD cluster"
+  exec_in_container "cd /workspace/terraform && terraform init && terraform apply -auto-approve" && print_success "KinD cluster created."
 }
 
 # Function to deploy Kubernetes manifests using kubectl inside the Docker container
 deploy_kubernetes_manifests() {
-  echo "Deploying Kubernetes manifests..."
+  print_header "Deploying Kubernetes manifests"
   exec_in_container "cd /workspace/k8s-manifests && ./deploy_manifests.sh"
 }
 
 # Check if Kubernetes API server is accessible
 check_k8s_api_server() {
-  echo "Checking if Kubernetes API server is accessible..."
-  exec_in_container "kubectl cluster-info"
+  print_header "Checking if Kubernetes API server is accessible"
+  exec_in_container "kubectl cluster-info" && print_success "Kubernetes API server is accessible."
 }
 
 # Function to stop the Docker container
 stop_docker_container() {
-  echo "Stopping Docker container..."
-  docker stop "${CONTAINER_NAME}"
+  print_header "Stopping Docker container"
+  docker stop "${CONTAINER_NAME}" && print_success "Docker container stopped."
 }
 
 # Remove the Docker container and image, and clean up Terraform resources
 cleanup_resources() {
-  echo "Destroying Terraform resources..."
-  exec_in_container "cd /workspace/terraform && terraform destroy -auto-approve && rm -rf .terraform terraform.tfstate* .terraform.lock.hcl"
+  print_header "Destroying Terraform resources"
+  exec_in_container "cd /workspace/terraform && terraform destroy -auto-approve && rm -rf .terraform terraform.tfstate* .terraform.lock.hcl" && print_success "Terraform resources destroyed."
 
-  echo "Stopping and removing Docker container..."
-  docker rm -f "${CONTAINER_NAME}"
+  print_header "Stopping and removing Docker container"
+  docker rm -f "${CONTAINER_NAME}" && print_success "Docker container removed."
 
-  echo "Removing Docker image..."
-  docker rmi -f "${IMAGE_NAME}"
+  print_header "Removing Docker image"
+  docker rmi -f "${IMAGE_NAME}" && print_success "Docker image removed."
 
-  echo "Removing KinD node images..."
+  print_header "Removing KinD node images"
   KIND_IMAGES=$(docker images | grep 'kindest/' | awk '{print $3}')
   if [ -z "$KIND_IMAGES" ]; then
-    echo "No KinD node images found."
+    print_success "No KinD node images found."
   else
-    echo "KinD node images to be removed: $KIND_IMAGES"
-    echo "$KIND_IMAGES" | xargs -r docker rmi -f
+    echo "$KIND_IMAGES" | xargs -r docker rmi -f && print_success "KinD node images removed."
   fi
 
-  echo "Listing all Docker images after cleanup..."
+  print_header "Listing all Docker images after cleanup"
   docker images
 }
 
 # Access the running Docker container interactively
 access_container() {
-  echo "Accessing Docker container interactively..."
+  print_header "Accessing Docker container interactively"
   docker exec -it "${CONTAINER_NAME}" /bin/bash -c "
       cd /workspace
       if [ -f .env ]; then
@@ -102,26 +102,18 @@ access_container() {
 
 # Function to generate the metrics report inside the Docker container
 generate_metrics_report() {
-  local script_name=$1
+  exec_in_container "DURATION=${PROMETHEUS_QUERY_DURATION} STEP=${PROMETHEUS_QUERY_STEP} /workspace/util/metrics_script"
+}
 
-  echo "Running kubectl port-forward for Prometheus..."
-  exec_in_container "kubectl port-forward -n monitor svc/prometheus-operated 9090:9090 & echo \$! > /tmp/port_forward_pid"
-
-  echo "Waiting for port-forward to establish..."
-  sleep 5
-
-  echo "Running metrics script inside Docker container..."
-  exec_in_container "/workspace/util/${script_name}"
-
-  echo "Killing kubectl port-forward..."
-  exec_in_container "kill \$(cat /tmp/port_forward_pid) && rm /tmp/port_forward_pid"
-
-  echo "Metrics report generated"
+# Function to run benchmarks using Artillery
+# Function to run benchmarks using Artillery
+run_benchmarks() {
+  exec_in_container "BENCHMARK_WARMUP_DURATION=${BENCHMARK_WARMUP_DURATION} BENCHMARK_WARMUP_ARRIVAL_RATE=${BENCHMARK_WARMUP_ARRIVAL_RATE} BENCHMARK_WARMUP_RAMP_UP_TO=${BENCHMARK_WARMUP_RAMP_UP_TO} BENCHMARK_SUSTAINED_DURATION=${BENCHMARK_SUSTAINED_DURATION} BENCHMARK_SUSTAINED_ARRIVAL_RATE=${BENCHMARK_SUSTAINED_ARRIVAL_RATE} /workspace/util/run_benchmarks $1"
 }
 
 # Display usage information
 usage() {
-  echo "Usage: $0 {setup|docker <docker-command>|terraform <terraform-command>|kind <kind-command>|kubectl <kubectl-command>|apply|stop|cleanup|access|generate-metrics-report <script-name>}"
+  echo "Usage: $0 {setup|docker <docker-command>|terraform <terraform-command>|kind <kind-command>|kubectl <kubectl-command>|apply|stop|cleanup|access|generate-metrics-report <script-name>|benchmark [scenario]}"
   echo
   echo "Commands:"
   echo "  setup                       Build the Docker image, run the container, set up the KinD cluster, and deploy Kubernetes manifests"
@@ -134,6 +126,7 @@ usage() {
   echo "  cleanup                     Destroy Terraform resources, stop and remove the Docker container, and remove the Docker image"
   echo "  access                      Access the running Docker container interactively"
   echo "  generate-metrics-report     Run the metrics script inside the Docker container"
+  echo "  benchmark [scenario]        Run benchmarking tests with Artillery. If scenario is provided, only that scenario is run."
   echo
   echo "Examples:"
   echo "  $0 setup"
@@ -146,6 +139,8 @@ usage() {
   echo "  $0 cleanup"
   echo "  $0 access"
   echo "  $0 generate-metrics-report"
+  echo "  $0 benchmark"
+  echo "  $0 benchmark \"Test foo endpoint\""
 }
 
 # Main entry point
@@ -188,7 +183,11 @@ main() {
       ;;
     generate-metrics-report)
       shift
-      generate_metrics_report metrics_script
+      generate_metrics_report
+      ;;
+    benchmark)
+      shift
+      run_benchmarks "$1"
       ;;
     *)
       usage

@@ -1,5 +1,52 @@
 #!/bin/bash
 
+# Namespace variables
+NAMESPACE_MONITOR="monitor"
+
+source ./util/common-functions.sh
+
+# Validate input arguments
+if [ -z "$DURATION" ] || [ -z "$STEP" ]; then
+  print_error "DURATION and STEP environment variables are required"
+  exit 1
+fi
+
+# Calculate START based on current time and DURATION
+END=$(date +%s)
+START=$((END - DURATION))
+
+# Display report generation parameters
+print_header "Report Generation Parameters"
+printf "🔹️ Duration: %s seconds\n" "$DURATION"
+printf "🔹 Step: %s seconds\n" "$STEP"
+printf "🔹 Start Time: %s\n" "$(date -d @$START '+%Y-%m-%d %H:%M:%S %Z')"
+printf "🔹 End Time: %s\n" "$(date -d @$END '+%Y-%m-%d %H:%M:%S %Z')"
+echo
+
+# Function to set up port-forwarding
+setup_port_forwarding() {
+  print_header "Setting Up Port-Forwarding"
+  kubectl port-forward -n $NAMESPACE_MONITOR svc/prometheus-operated 9090:9090 > /dev/null 2>&1 &
+  echo $! > /tmp/port_forward_pid
+  sleep 5
+
+  # Check if port-forwarding is successfully established
+  if ! kill -0 "$(cat /tmp/port_forward_pid)"; then
+    print_error "Failed to establish port-forwarding to Prometheus."
+    exit 1
+  fi
+  print_success "Port-forwarding to Prometheus established."
+}
+
+# Function to clean up port-forwarding
+cleanup_port_forwarding() {
+  print_header "Cleaning Up Port-Forwarding"
+  kill "$(cat /tmp/port_forward_pid)" && rm /tmp/port_forward_pid
+}
+
+# Set up port-forwarding
+setup_port_forwarding
+
 # Set the Prometheus server URL
 PROMETHEUS_URL="http://localhost:9090/api/v1/query_range"
 
@@ -19,31 +66,39 @@ LABELS=(
 
 # Define the time range for the queries
 END=$(date +%s)
-START=$((END - 3600))  # last 1 hour
-STEP="60"  # interval step in seconds (1 minute)
 
 # Fetch data from Prometheus
 fetch_data() {
   local query=$1
-  curl -s -G "${PROMETHEUS_URL}" --data-urlencode "query=${query}" --data-urlencode "start=${START}" --data-urlencode "end=${END}" --data-urlencode "step=${STEP}"
+  curl -s -G "${PROMETHEUS_URL}" --data-urlencode "query=${query}" --data-urlencode "start=${START}" --data-urlencode "end=${END}" --data-urlencode "step=${STEP}s"
 }
 
 # Create a temporary directory to store JSON responses
 TMP_DIR=$(mktemp -d)
 
+print_header "Fetching Data from Prometheus"
 # Fetch data for each query and save the response to a temporary file
 for i in "${!QUERIES[@]}"; do
-  fetch_data "${QUERIES[$i]}" > "${TMP_DIR}/${LABELS[$i]}.json"
+  response=$(fetch_data "${QUERIES[$i]}")
+  if echo "$response" | jq .status | grep -q "success"; then
+    echo "$response" > "${TMP_DIR}/${LABELS[$i]}.json"
+    print_success "Data for ${LABELS[$i]} fetched."
+  else
+    print_error "Failed to fetch data for ${LABELS[$i]}"
+    echo "$response"
+    exit 1
+  fi
 done
 
 # Generate CSV report
-REPORT_DIR="/workspace/report"
+REPORT_DIR="/workspace/report/metrics"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-REPORT_FILE="${REPORT_DIR}/metrics_report_${TIMESTAMP}.csv"
+REPORT_FILE="${REPORT_DIR}/${TIMESTAMP}.csv"
 
 # Ensure the report directory exists
 mkdir -p "${REPORT_DIR}"
 
+print_header "Generating CSV Report"
 # Write the CSV header
 echo "timestamp,avg_requests_per_second,avg_memory_usage_per_second,avg_cpu_usage_per_second" > "${REPORT_FILE}"
 
@@ -56,10 +111,19 @@ for timestamp in $TIMESTAMPS; do
   avg_requests_per_second=$(jq -r ".data.result[0].values[] | select(.[0] == ${timestamp}) | .[1]" "${TMP_DIR}/${LABELS[0]}.json")
   avg_memory_usage_per_second=$(jq -r ".data.result[0].values[] | select(.[0] == ${timestamp}) | .[1]" "${TMP_DIR}/${LABELS[1]}.json")
   avg_cpu_usage_per_second=$(jq -r ".data.result[0].values[] | select(.[0] == ${timestamp}) | .[1]" "${TMP_DIR}/${LABELS[2]}.json")
+
+  # Default to 0 if no data is found for the timestamp
+  avg_requests_per_second=${avg_requests_per_second:-0}
+  avg_memory_usage_per_second=${avg_memory_usage_per_second:-0}
+  avg_cpu_usage_per_second=${avg_cpu_usage_per_second:-0}
+
   echo "${human_readable_timestamp},${avg_requests_per_second},${avg_memory_usage_per_second},${avg_cpu_usage_per_second}" >> "${REPORT_FILE}"
 done
+
+print_success "CSV report generated at ${REPORT_FILE}"
 
 # Clean up temporary directory
 rm -rf "${TMP_DIR}"
 
-echo "Metrics report generated at ${REPORT_FILE}"
+# Clean up port-forwarding
+cleanup_port_forwarding

@@ -1,0 +1,16 @@
+# Helper functions for formatting output
+print_header() {
+  printf "\n\e[1;34m%s\e[0m\n" "=== $1 ==="
+}
+
+print_success() {
+  printf "\e[1;32m%s\e[0m\n" "✅ $1"
+}
+
+print_error() {
+  printf "\e[1;31m%s\e[0m\n" "❌ $1"
+}
+
+print_inprogress() {
+  printf "\e[1;33m%s\e[0m\n" "🔄 $1"
+}

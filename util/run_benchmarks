@@ -1,0 +1,96 @@
+#!/bin/bash
+
+source ./util/common-functions.sh
+
+# Check if required environment variables are set
+if [ -z "$BENCHMARK_WARMUP_DURATION" ] || [ -z "$BENCHMARK_WARMUP_ARRIVAL_RATE" ] || [ -z "$BENCHMARK_WARMUP_RAMP_UP_TO" ] || [ -z "$BENCHMARK_SUSTAINED_DURATION" ] || [ -z "$BENCHMARK_SUSTAINED_ARRIVAL_RATE" ]; then
+  print_error "Required environment variables for benchmarking are not set."
+  exit 1
+fi
+
+# Display benchmarking parameters
+print_header "Benchmarking Parameters"
+printf "🔹 Warm-up Phase Duration: %s seconds\n" "$BENCHMARK_WARMUP_DURATION"
+printf "🔹 Warm-up Phase Arrival Rate: %s users/second\n" "$BENCHMARK_WARMUP_ARRIVAL_RATE"
+printf "🔹 Warm-up Phase Ramp Up To: %s users/second\n" "$BENCHMARK_WARMUP_RAMP_UP_TO"
+printf "🔹 Sustained Phase Duration: %s seconds\n" "$BENCHMARK_SUSTAINED_DURATION"
+printf "🔹 Sustained Phase Arrival Rate: %s users/second\n" "$BENCHMARK_SUSTAINED_ARRIVAL_RATE"
+echo
+
+# Generate Artillery configuration dynamically
+generate_artillery_config() {
+  cat <<EOF
+config:
+  target: "$BENCHMARK_TARGET_URL"
+  phases:
+    - duration: $BENCHMARK_WARMUP_DURATION
+      arrivalRate: $BENCHMARK_WARMUP_ARRIVAL_RATE
+      rampTo: $BENCHMARK_WARMUP_RAMP_UP_TO
+      name: "Warm up"
+    - duration: $BENCHMARK_SUSTAINED_DURATION
+      arrivalRate: $BENCHMARK_SUSTAINED_ARRIVAL_RATE
+      name: "Sustained load"
+  defaults:
+    headers:
+      Content-Type: "application/json"
+
+scenarios:
+  - name: "Test foo endpoint"
+    flow:
+      - get:
+          url: "/foo"
+
+  - name: "Test bar endpoint"
+    flow:
+      - get:
+          url: "/bar"
+
+  - name: "Test foo and bar endpoints sequentially"
+    flow:
+      - get:
+          url: "/foo"
+      - get:
+          url: "/bar"
+EOF
+}
+
+# Save Artillery configuration to a file
+ARTILLERY_CONFIG_FILE="/workspace/util/artillery.yml"
+generate_artillery_config > "$ARTILLERY_CONFIG_FILE"
+
+# Function to run benchmarks using Artillery
+run_benchmarks() {
+  local scenario=$1
+  local output_suffix=""
+  local timestamp
+  timestamp=$(date +"%Y%m%d%H%M%S")
+  local report_dir="/workspace/report/benchmarking/$timestamp"
+
+  if [ -n "$scenario" ]; then
+    output_suffix="-$scenario"
+    scenario="--scenario \"$scenario\""
+  fi
+
+  print_header "Running benchmarks with Artillery"
+  if [ ! -f $ARTILLERY_CONFIG_FILE ]; then
+    print_error "Artillery configuration file not found: $ARTILLERY_CONFIG_FILE"
+    exit 1
+  fi
+
+  mkdir -p $report_dir
+
+  echo 'Starting Artillery load test...'
+  artillery run $scenario --output $report_dir/artillery-report${output_suffix}.json $ARTILLERY_CONFIG_FILE
+  print_success "Artillery load test completed."
+
+  echo 'Generating HTML report...'
+  artillery report --output $report_dir/artillery-report${output_suffix}.html $report_dir/artillery-report${output_suffix}.json
+  print_success "HTML report generated."
+
+  print_success "Benchmarking with Artillery completed. Reports generated:"
+  echo "  - JSON report: $report_dir/artillery-report${output_suffix}.json"
+  echo "  - HTML report: $report_dir/artillery-report${output_suffix}.html"
+}
+
+# Execute the run_benchmarks function
+run_benchmarks "$1"
