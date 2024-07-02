@@ -1,6 +1,6 @@
 #!/bin/bash
 
-source ./util/common-functions.sh
+source ./util/common-functions
 
 # Check if required environment variables are set
 if [ -z "$BENCHMARK_WARMUP_DURATION" ] || [ -z "$BENCHMARK_WARMUP_ARRIVAL_RATE" ] || [ -z "$BENCHMARK_WARMUP_RAMP_UP_TO" ] || [ -z "$BENCHMARK_SUSTAINED_DURATION" ] || [ -z "$BENCHMARK_SUSTAINED_ARRIVAL_RATE" ]; then

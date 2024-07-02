@@ -1,6 +1,6 @@
 #!/bin/bash
 
-source ./util/common-functions.sh
+source ./util/common-functions
 
 # Load environment variables from .env file if it exists
 if [ -f .env ]; then
@@ -48,7 +48,7 @@ create_kind_cluster() {
 # Function to deploy Kubernetes manifests using kubectl inside the Docker container
 deploy_kubernetes_manifests() {
   print_header "Deploying Kubernetes manifests"
-  exec_in_container "cd /workspace/k8s-manifests && ./deploy_manifests.sh"
+  exec_in_container "cd /workspace/k8s-manifests && ./deploy_manifests"
 }
 
 # Check if Kubernetes API server is accessible

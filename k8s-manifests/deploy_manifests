@@ -1,6 +1,6 @@
 #!/bin/bash
 
-source ../util/common-functions.sh
+source ../util/common-functions
 
 # Namespace variables
 NAMESPACE_APP="app"

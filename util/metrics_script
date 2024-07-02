@@ -3,7 +3,7 @@
 # Namespace variables
 NAMESPACE_MONITOR="monitor"
 
-source ./util/common-functions.sh
+source ./util/common-functions
 
 # Validate input arguments
 if [ -z "$DURATION" ] || [ -z "$STEP" ]; then
